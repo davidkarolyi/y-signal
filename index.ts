@@ -1,28 +1,37 @@
 import { Server as WebsocketServer } from "ws";
 import { IncomingMessage, Server as HttpServer } from "http";
+import { Server as HttpsServer } from "https";
 import stream from "stream";
 
-export type SignalingServerConfig = {
-  httpServer: HttpServer;
-  isAuthorized: (request: IncomingMessage) => Promise<boolean> | boolean;
+export type SignalingServerConfig<
+  TRequest extends IncomingMessage = IncomingMessage
+> = {
+  server: HttpServer | HttpsServer;
+  isAuthorized?: (request: TRequest) => Promise<boolean> | boolean;
 };
 
-export class SignalingServer {
+export class SignalingServer<
+  TRequest extends IncomingMessage = IncomingMessage
+> {
   private readonly websocketServer: WebsocketServer;
 
-  constructor(private readonly config: SignalingServerConfig) {
+  constructor(private readonly config: SignalingServerConfig<TRequest>) {
     this.websocketServer = new WebsocketServer({ noServer: true });
 
-    this.config.httpServer.on("upgrade", this.onProtocolUpgrade.bind(this));
+    this.config.server.on("upgrade", this.onProtocolUpgrade.bind(this));
     this.websocketServer.on("connection", this.onSocketConnection.bind(this));
   }
 
   private async onProtocolUpgrade(
-    request: IncomingMessage,
+    request: TRequest,
     socket: stream.Duplex,
     upgradeHead: Buffer
   ) {
-    if (!(await this.config.isAuthorized(request))) {
+    const isRequestAuthorized = this.config.isAuthorized
+      ? await this.config.isAuthorized(request)
+      : true;
+
+    if (!isRequestAuthorized) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
       return;
