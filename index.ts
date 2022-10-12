@@ -1,4 +1,4 @@
-import { Server as WebsocketServer } from "ws";
+import { Server as WebsocketServer, WebSocket } from "ws";
 import { IncomingMessage, Server as HttpServer } from "http";
 import { Server as HttpsServer } from "https";
 import stream from "stream";
@@ -14,6 +14,8 @@ export class SignalingServer<
   TRequest extends IncomingMessage = IncomingMessage
 > {
   private readonly websocketServer: WebsocketServer;
+  private readonly connectionsByTopics = new Map<string, Set<WebSocket>>();
+  private readonly topicsByConnection = new Map<WebSocket, Set<string>>();
 
   constructor(private readonly config: SignalingServerConfig<TRequest>) {
     this.websocketServer = new WebsocketServer({ noServer: true });
@@ -47,5 +49,40 @@ export class SignalingServer<
     );
   }
 
-  private onSocketConnection() {}
+  private onSocketConnection(connection: WebSocket) {
+    let pongReceived = true;
+    const pingInterval = setInterval(() => {
+      if (!pongReceived) {
+        connection.close();
+        clearInterval(pingInterval);
+      } else {
+        pongReceived = false;
+        try {
+          connection.ping();
+        } catch (_) {
+          connection.close();
+        }
+      }
+    }, 30000);
+    connection.on("pong", () => {
+      pongReceived = true;
+    });
+
+    connection.on("close", () => {
+      const topics =
+        this.topicsByConnection.get(connection) || new Set<string>();
+
+      topics.forEach((topic) => {
+        const connections = this.connectionsByTopics.get(topic) || new Set();
+        connections.delete(connection);
+        if (connections.size === 0) {
+          topics.delete(topic);
+        }
+      });
+
+      topics.clear();
+    });
+
+    connection.on("message", (rawMessage) => {});
+  }
 }
